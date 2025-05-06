@@ -37,8 +37,8 @@ const MAX_PRICE = 37.00;
       });
 
       if (!priceText) {
-        console.log('⏳ Prezzo non trovato. Riprovo tra 10s...');
-        await new Promise(r => setTimeout(r, 10000));
+        console.log('⏳ Prezzo non trovato. Riprovo tra 2s...');
+        await new Promise(r => setTimeout(r, 2000));
         continue;
       }
 
