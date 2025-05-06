@@ -4,12 +4,32 @@ const PRODUCT_URL = /* 'https://www.amazon.it/dp/B0C8NR3FPG'; */ 'https://www.am
 const MAX_PRICE = 37.00;
 
 (async () => {
-    const browser = await puppeteer.launch({
+/*     const browser = await puppeteer.launch({
         headless: false,
         defaultViewport: null,
         executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
         userDataDir: '/Users/gabrielemurgia/amazon-profile'
-      });
+      }); */
+
+      const os = require('os');
+const path = require('path');
+
+const userHome = os.homedir();
+const chromePath = process.platform === 'darwin'
+  ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  : process.platform === 'win32'
+  ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+  : '/usr/bin/google-chrome'; // per Linux
+
+const profilePath = path.join(userHome, 'amazon-profile');
+
+const browser = await puppeteer.launch({
+  headless: false,
+  defaultViewport: null,
+  executablePath: chromePath,
+  userDataDir: profilePath
+});
+
       
       
   const page = await browser.newPage();
