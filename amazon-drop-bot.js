@@ -1,18 +1,11 @@
 const puppeteer = require('puppeteer');
+const os = require('os');
+const path = require('path');
 
 const PRODUCT_URL = /* 'https://www.amazon.it/dp/B0C8NR3FPG'; */ 'https://www.amazon.it/dp/B07FSR1VB3';
 const MAX_PRICE = 37.00;
 
 (async () => {
-/*     const browser = await puppeteer.launch({
-        headless: false,
-        defaultViewport: null,
-        executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        userDataDir: '/Users/gabrielemurgia/amazon-profile'
-      }); */
-
-      const os = require('os');
-const path = require('path');
 
 const userHome = os.homedir();
 const chromePath = process.platform === 'darwin'
