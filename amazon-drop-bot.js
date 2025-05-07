@@ -9,6 +9,26 @@ const PRODUCTS = [
     maxPrice: 37.00
   },
   {
+    asin: 'B0C8NSGN2H',
+    url: 'https://www.amazon.it/dp/B0C8NSGN2H',
+    maxPrice: 60.00
+  },
+  {
+    asin: 'B0BSR7T3G7',
+    url: 'https://www.amazon.it/dp/B0BSR7T3G7',
+    maxPrice: 60.00
+  },
+  {
+    asin: 'B0DFD2XFHL',
+    url: 'https://www.amazon.it/dp/B0DFD2XFHL',
+    maxPrice: 60.00
+  },
+  {
+    asin: 'B0DX2K9KKZ',
+    url: 'https://www.amazon.it/dp/B0DX2K9KKZ',
+    maxPrice: 120.00
+  },
+  {
     asin: 'B0DTQCBW9B',
     url: 'https://www.amazon.it/dp/B0DTQCBW9B',
     maxPrice: 39.99
@@ -19,6 +39,7 @@ const PRODUCTS = [
     maxPrice: 60.00
   }
 ];
+
 (async () => {
     const chromePath = process.platform === 'darwin'
       ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
