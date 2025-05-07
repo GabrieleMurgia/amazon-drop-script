@@ -2,16 +2,25 @@ const puppeteer = require('puppeteer');
 const os = require('os');
 const path = require('path');
 
-/* const PRODUCT_URL = 'https://www.amazon.it/gp/product/B0C8NR3FPG/ref=ox_sc_saved_image_1?smid=A11IL2PNWYJU7H&psc=1'; */
-const PRODUCT_URL = 'https://www.amazon.it/dp/B0C8NR3FPG'
-const MAX_PRICE = 37.00;
+const PRODUCTS = [
+  {
+    asin: 'B0C8NR3FPG',
+    url: 'https://www.amazon.it/dp/B0C8NR3FPG',
+    maxPrice: 37.00
+  },
+  {
+    asin: 'INSERISCI_ALTRA_ASIN',
+    url: 'https://www.amazon.it/dp/B0C8NR3FPG',
+    maxPrice: 45.50
+  }
+];
 
 (async () => {
   const chromePath = process.platform === 'darwin'
     ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     : process.platform === 'win32'
-    ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-    : '/usr/bin/google-chrome';
+      ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+      : '/usr/bin/google-chrome';
 
   const browser = await puppeteer.launch({
     headless: false,
@@ -21,64 +30,71 @@ const MAX_PRICE = 37.00;
     args: ['--start-maximized']
   });
 
-  const page = await browser.newPage();
-  let attempts = 0;
+  const pages = await Promise.all(PRODUCTS.map(() => browser.newPage()));
 
-  while (true) {
+  // Blocca solo immagini e font, ma lascia i CSS per mantenere lo stile
+  for (const page of pages) {
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      const type = req.resourceType();
+      if (['image', 'font'].includes(type)) req.abort();
+      else req.continue();
+    });
+  }
+
+  async function checkProductPrice(page, product) {
     try {
-      await page.goto(PRODUCT_URL, { waitUntil: 'load', timeout: 30000 });
+      await page.goto(product.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
       const priceText = await page.$eval('#corePrice_feature_div span.a-offscreen', el =>
-        el.textContent.replace(',', '.').replace(/[^\d.]/g, '')
+        el.textContent.replace(',', '.').replace(/[^0-9.]/g, '')
       );
 
       const price = parseFloat(priceText);
-      console.log(`💰 Prezzo attuale: €${price}`);
+      console.log(`💰 [${product.asin}] Prezzo: €${price}`);
 
-      if (price <= MAX_PRICE) {
-        console.log('🎯 Prezzo accettabile, inizio processo d’acquisto');
+      if (price <= product.maxPrice) {
+        console.log(`🎯 [${product.asin}] Prezzo OK (€${price}). Acquisto in corso...`);
 
         await Promise.all([
-          page.waitForNavigation({ waitUntil: 'load' }),
+          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
           page.click('#buy-now-button')
         ]);
 
-        const secondBuyNow = await page.$('input[type="submit"][value="Acquista ora"]');
-        if (secondBuyNow) {
+        const confirmBtn = await page.$('input[type="submit"][value="Acquista ora"]');
+        if (confirmBtn) {
           await Promise.all([
-            page.waitForNavigation({ waitUntil: 'load' }),
-            secondBuyNow.click()
+            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+            confirmBtn.click()
           ]);
         }
 
         const proceedBtn = await page.$('input[name="proceedToRetailCheckout"]');
         if (proceedBtn) {
           await proceedBtn.click();
-          console.log('✅ Procedura di checkout avviata! Completa manualmente.');
-          break;
+          console.log(`✅ Checkout avviato per ${product.asin}. Completa manualmente.`);
+          await browser.close();
+          process.exit(0);
         }
 
-        const errorFound = await page.evaluate(() => {
-          const text = document.body.innerText.toLowerCase();
-          return text.includes('ops! ci dispiace') || text.includes('errore');
-        });
-
-        if (errorFound) {
-          console.log('🚨 Errore Amazon. Riprovo subito...');
-        } else {
-          console.log('🌀 Nessun errore ma checkout non trovato. Riprovo subito...');
-        }
-
+        const error = await page.evaluate(() => document.body.innerText.toLowerCase().includes('errore'));
+        console.log(error ? `🚨 [${product.asin}] Errore nel checkout` : `🌀 [${product.asin}] Checkout non trovato`);
       } else {
-        console.log(`❌ Prezzo troppo alto (€${price}). Riprovo tra 1s...`);
-        await new Promise(r => setTimeout(r, 2000));
+        console.log(`❌ [${product.asin}] Prezzo troppo alto. (€${price})`);
       }
-
     } catch (err) {
-      console.error('❌ Errore:', err.message);
-      await new Promise(r => setTimeout(r, 2000));
+      console.error(`❌ [${product.asin}] Errore: ${err.message}`);
     }
+  }
 
-    if (++attempts % 10 === 0) console.log(`🔁 Tentativi: ${attempts}`);
+  let cycles = 0;
+  while (true) {
+    await Promise.all(
+      pages.map((page, i) => checkProductPrice(page, PRODUCTS[i]))
+    );
+
+    cycles++;
+    if (cycles % 5 === 0) console.log(`🔁 Cicli completati: ${cycles}`);
+    await new Promise(r => setTimeout(r, 1500));
   }
 })();
