@@ -27,7 +27,6 @@ function getChromePath() {
 async function checkProductPrice(page, product) {
   try {
     await page.goto(product.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForTimeout(3000 + Math.random() * 2000); // 3–5s
 
     const priceText = await page.$eval('#corePrice_feature_div span.a-offscreen', el =>
       el.textContent.replace(',', '.').replace(/[^0-9.]/g, '')
