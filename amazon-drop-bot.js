@@ -2,94 +2,83 @@ const puppeteer = require('puppeteer');
 const os = require('os');
 const path = require('path');
 
-/* const PRODUCT_URL = 'https://www.amazon.it/dp/B07FSR1VB3';  */
-const PRODUCT_URL = 'https://www.amazon.it/dp/B0C8NR3FPG';
+/* const PRODUCT_URL = 'https://www.amazon.it/gp/product/B0C8NR3FPG/ref=ox_sc_saved_image_1?smid=A11IL2PNWYJU7H&psc=1'; */
+const PRODUCT_URL = 'https://www.amazon.it/dp/B0C8NR3FPG'
 const MAX_PRICE = 37.00;
 
 (async () => {
-  const userHome = os.homedir();
   const chromePath = process.platform === 'darwin'
     ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     : process.platform === 'win32'
     ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-    : '/usr/bin/google-chrome'; // Linux fallback
-
-  const profilePath = path.join(userHome, 'amazon-profile');
+    : '/usr/bin/google-chrome';
 
   const browser = await puppeteer.launch({
     headless: false,
-    defaultViewport: null,
     executablePath: chromePath,
-    userDataDir: profilePath
+    userDataDir: path.join(os.homedir(), 'amazon-profile'),
+    defaultViewport: null,
+    args: ['--start-maximized']
   });
 
   const page = await browser.newPage();
+  let attempts = 0;
 
-  let success = false;
-
-  while (!success) {
+  while (true) {
     try {
-      await page.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(PRODUCT_URL, { waitUntil: 'load', timeout: 30000 });
 
-      const priceText = await page.evaluate(() => {
-        const priceEl = document.querySelector('#corePrice_feature_div span.a-offscreen');
-        return priceEl ? priceEl.textContent.replace(',', '.').replace(/[^\d.]/g, '') : null;
-      });
-
-      if (!priceText) {
-        console.log('⏳ Prezzo non trovato. Riprovo tra 2s...');
-        await new Promise(r => setTimeout(r, 2000));
-        continue;
-      }
+      const priceText = await page.$eval('#corePrice_feature_div span.a-offscreen', el =>
+        el.textContent.replace(',', '.').replace(/[^\d.]/g, '')
+      );
 
       const price = parseFloat(priceText);
       console.log(`💰 Prezzo attuale: €${price}`);
 
       if (price <= MAX_PRICE) {
-        console.log('🎯 Prezzo OK! Provo ad acquistare...');
+        console.log('🎯 Prezzo accettabile, inizio processo d’acquisto');
 
-        const buyNowButton = await page.$('#buy-now-button');
-        if (!buyNowButton) throw new Error('Pulsante "Acquista ora" non trovato');
-        await buyNowButton.click();
-        await new Promise(r => setTimeout(r, 5000));
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'load' }),
+          page.click('#buy-now-button')
+        ]);
 
-        // Secondo "Acquista ora"
         const secondBuyNow = await page.$('input[type="submit"][value="Acquista ora"]');
         if (secondBuyNow) {
-          console.log('🔁 Secondo "Acquista ora" rilevato, clicco...');
-          await secondBuyNow.click();
-          await new Promise(r => setTimeout(r, 5000));
-        } else {
-          console.log('⚠️ Nessun secondo "Acquista ora" trovato. Forse ordine già confermato.');
-        }
-
-        // Controllo pagina di errore (post acquisto)
-        const errorDetected = await page.evaluate(() => {
-          return document.body.innerText.includes('Ops! Ci dispiace') ||
-                 document.body.innerText.toLowerCase().includes('si è verificato un errore');
-        });
-
-        if (errorDetected) {
-          console.log('🚨 Errore "Ops! Ci dispiace" rilevato! Ricarico la pagina e riprovo...');
-          await page.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          continue;
+          await Promise.all([
+            page.waitForNavigation({ waitUntil: 'load' }),
+            secondBuyNow.click()
+          ]);
         }
 
         const proceedBtn = await page.$('input[name="proceedToRetailCheckout"]');
         if (proceedBtn) {
           await proceedBtn.click();
-          console.log('🛒 Procedura avviata! Completa l’ordine manualmente.');
-          success = true;
-        } else {
-          console.log('😢 Checkout non trovato. Riprovo...');
+          console.log('✅ Procedura di checkout avviata! Completa manualmente.');
+          break;
         }
+
+        const errorFound = await page.evaluate(() => {
+          const text = document.body.innerText.toLowerCase();
+          return text.includes('ops! ci dispiace') || text.includes('errore');
+        });
+
+        if (errorFound) {
+          console.log('🚨 Errore Amazon. Riprovo subito...');
+        } else {
+          console.log('🌀 Nessun errore ma checkout non trovato. Riprovo subito...');
+        }
+
       } else {
-        console.log('⏳ Prezzo troppo alto, aspetto 30s...');
-        await new Promise(r => setTimeout(r, 30000));
+        console.log(`❌ Prezzo troppo alto (€${price}). Riprovo tra 15s...`);
+        await new Promise(r => setTimeout(r, 15000));
       }
+
     } catch (err) {
       console.error('❌ Errore:', err.message);
-      await new Promise(r => setTimeout(r, 10000));
+      await new Promise(r => setTimeout(r, 8000));
     }
+
+    if (++attempts % 10 === 0) console.log(`🔁 Tentativi: ${attempts}`);
   }
 })();
