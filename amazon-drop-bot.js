@@ -9,9 +9,14 @@ const PRODUCTS = [
     maxPrice: 37.00
   },
   {
-    asin: 'INSERISCI_ALTRA_ASIN',
-    url: 'https://www.amazon.it/dp/B0C8NR3FPG',
-    maxPrice: 45.50
+    asin: 'B0DTQCBW9B',
+    url: 'https://www.amazon.it/dp/B0DTQCBW9B',
+    maxPrice: 39.99
+  },
+  {
+    asin: 'B0DSPWGZ7Q',
+    url: 'https://www.amazon.it/dp/B0DSPWGZ7Q',
+    maxPrice: 60.00
   }
 ];
 
