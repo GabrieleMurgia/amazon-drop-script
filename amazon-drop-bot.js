@@ -115,7 +115,7 @@ async function monitorProduct(page, product) {
     args: ['--start-maximized']
   });
 
-  // Crea una pagina per ciascun prodotto e avvia subito il suo loop dedicato
+  // loop per ogni tab
   for (const product of PRODUCTS) {
     const page = await browser.newPage();
 
