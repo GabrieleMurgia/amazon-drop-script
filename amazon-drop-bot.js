@@ -76,7 +76,7 @@ const MAX_PRICE = 37.00;
 
     } catch (err) {
       console.error('❌ Errore:', err.message);
-      await new Promise(r => setTimeout(r, 8000));
+      await new Promise(r => setTimeout(r, 2000));
     }
 
     if (++attempts % 10 === 0) console.log(`🔁 Tentativi: ${attempts}`);
