@@ -71,7 +71,7 @@ const MAX_PRICE = 37.00;
 
       } else {
         console.log(`❌ Prezzo troppo alto (€${price}). Riprovo tra 15s...`);
-        await new Promise(r => setTimeout(r, 15000));
+        await new Promise(r => setTimeout(r, 2000));
       }
 
     } catch (err) {
