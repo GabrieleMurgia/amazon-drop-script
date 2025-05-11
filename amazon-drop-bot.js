@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────
-// amazon-drop-bot.js  (modulo di acquisto)
+// FILE: amazon-drop-bot.js  (modulo di acquisto)
 // ────────────────────────────────────────────────
 import dotenv from 'dotenv';
 dotenv.config();
@@ -160,12 +160,14 @@ async function tryPurchase(asin) {
     });
 
     // logging traffico residuo (best effort)
-    fetch(`https://dashboard.iproyal.com/api/proxies/traffic?token=${IPR_API_TOKEN}`, {
-      dispatcher: new ProxyAgent(proxyUrl)
-    })
-    .then(r => r.json())
-    .then(j => console.log('📊 Proxy MB rimasti:', j?.remaining))
-    .catch(() => {});
+    if (IPR_API_TOKEN) {
+      fetch(`https://dashboard.iproyal.com/api/proxies/traffic?token=${IPR_API_TOKEN}`, {
+        dispatcher: new ProxyAgent(proxyUrl)
+      })
+      .then(r => r.json())
+      .then(j => console.log('📊 Proxy MB rimasti:', j?.remaining))
+      .catch(() => {});
+    }
   }
 
   // 5️⃣ blocca media/css ma NON xhr (checkout carica i form via xhr)
@@ -209,53 +211,4 @@ export { tryPurchase };
 
 
 // ────────────────────────────────────────────────
-// index.js  (listener Discord)
-// ────────────────────────────────────────────────
-import dotenv from 'dotenv';
-dotenv.config();
-
-import { Client } from 'discord.js-selfbot-v13';
-import { tryPurchase } from './amazon-drop-bot.js';
-
-const client      = new Client({ checkUpdate: false });
-const CHANNEL_ID  = '1350960827129401528';     // id canale Discord da monitorare
-
-// lista ASIN da trackare
-const validAsins = process.env.MONITOR_ASINS
-  ? process.env.MONITOR_ASINS.split(',').map(s => s.trim()).filter(Boolean)
-  : [
-      'B0C8NR3FPG','B0C8NSGN2H','B0BSR7T3G7',
-      'B0DFD2XFHL','B0DX2K9KKZ','B0DTQCBW9B',
-      'B0DK93ZQPC','B0CJJP1PQB'
-    ];
-
-console.log('ASIN monitorati:', validAsins.join(', '));
-
-const detectAsins = txt => validAsins.filter(a => txt?.includes(a));
-
-client.on('ready', () =>
-  console.log(`✅ Loggato come ${client.user.username}`)
-);
-
-client.on('messageCreate', msg => {
-  if (msg.channel.id !== CHANNEL_ID) return;
-
-  console.log('📥  Nuovo messaggio');
-  const tryAll = list => list.forEach(asin => {
-    console.log(`🚨  ASIN ${asin} trovato → tryPurchase`);
-    tryPurchase(asin);
-  });
-
-  /* testo normale */
-  const foundText = detectAsins(msg.content);
-  if (foundText.length) return tryAll(foundText);
-
-  /* embed */
-  for (const emb of msg.embeds) {
-    const all = `${emb.title || ''} ${emb.description || ''} ${emb.url || ''}`;
-    const found = detectAsins(all);
-    if (found.length) tryAll(found);
-  }
-});
-
-client.login(process.env.DISCORD_TOKEN);
+// FILE
