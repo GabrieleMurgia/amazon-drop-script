@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Amazon-Drop Bot GUI</title>
+
+  <!-- Tailwind (solo per demo) -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <style>
+    /* ░░░ Design Tokens ░░░ */
+    :root{
+      --brand-1:#4f46e5;            /* indigo-600      */
+      --brand-2:#6366f1;            /* indigo-500      */
+      --brand-3:#a5b4fc;            /* indigo-300      */
+      --accent :#22c55e;            /* emerald-500     */
+      --danger :#ef4444;            /* red-500         */
+      --glass  :rgba(255,255,255,.55);
+      --radius :1.25rem;            /* 20 px           */
+      --shadow :0 10px 25px -5px rgb(0 0 0 / .15),
+                0 5px 10px -4px  rgb(0 0 0 / .1);
+      --font   :'Poppins',system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+    }
+    
+    /* ░░░ Global ░░░ */
+    html{scroll-behavior:smooth;}
+    body{
+      font-family:var(--font);
+      background:linear-gradient(135deg,#1e3a8a 0%,#0f172a 100%);
+      background-attachment:fixed;
+      color:#0f172a;
+    }
+    
+    /* Animated aurora in background */
+    body::before{
+      content:'';
+      position:fixed;inset:0;pointer-events:none;z-index:-1;
+      background:conic-gradient(from 180deg at 50% 50%,
+        var(--brand-2) 0deg,var(--brand-1) 90deg,
+        #14b8a6 180deg,#8b5cf6 270deg,var(--brand-3) 360deg);
+      filter:blur(120px) saturate(150%);
+      animation:spin 18s linear infinite;
+      opacity:.35;
+    }
+    @keyframes spin{to{transform:rotate(1turn);}}
+    
+    /* ░░░ Card / Container ░░░ */
+    .bg-white{
+      background:var(--glass);
+      backdrop-filter:blur(22px) saturate(180%);
+      box-shadow:var(--shadow);
+      border:1px solid rgba(255,255,255,.3);
+      transition:box-shadow .3s ease,transform .25s ease;
+    }
+    .bg-white:hover{transform:translateY(-4px);box-shadow:0 18px 40px -8px rgb(0 0 0/.3);}
+    
+    /* ░░░ Inputs ░░░ */
+    .input{
+      background-color:rgba(255,255,255,.65);
+      border:1px solid rgba(0,0,0,.05);
+      transition:border-color .2s,box-shadow .2s,background-color .2s;
+    }
+    .input:focus{
+      border-color:var(--brand-2)!important;
+      box-shadow:0 0 0 3px rgb(99 102 241 / .3);
+      background-color:#fff;
+    }
+    
+    /* Password peek icon (pure CSS) */
+    input[type=password]{
+      padding-right:3rem;
+      position:relative;
+    }
+    input[type=password]::after{
+      content:'👁️';                  /* eye emoji */
+      position:absolute;right:.8rem;top:50%;
+      transform:translateY(-50%);font-size:1rem;
+      opacity:.3;transition:opacity .2s;
+      pointer-events:none;
+    }
+    input[type=password]:focus::after{opacity:.6;}
+    
+    /* ░░░ Buttons ░░░ */
+    button{
+      transition:transform .2s cubic-bezier(.4,0,.2,1),
+                 box-shadow .2s cubic-bezier(.4,0,.2,1);
+      will-change:transform;
+    }
+    button:hover{
+      transform:translateY(-2px) scale(1.02);
+      box-shadow:0 8px 16px -4px rgb(0 0 0/.25);
+    }
+    
+    /* Start button—pulse glow */
+    #startBtn{
+      position:relative;
+      overflow:hidden;
+    }
+    #startBtn::before{
+      content:'';
+      position:absolute;inset:-30%;
+      background:radial-gradient(circle at 50% 50%,var(--brand-3),transparent 70%);
+      opacity:0;animation:pulse 2.5s ease-in-out infinite;
+    }
+    @keyframes pulse{
+      0%,100%{transform:scale(.6);opacity:.15;}
+      50%   {transform:scale(1.15);opacity:.4;}
+    }
+    
+    /* Add-ASIN floating circle */
+    #addAsin{
+      border-radius:9999px;
+      width:42px;height:42px;padding:0;
+      display:inline-flex;align-items:center;justify-content:center;
+      font-size:1.25rem;line-height:1;
+    }
+    
+    /* Status badge */
+    #status{
+      font-weight:500;
+    }
+    #status:empty{display:none;}
+    #status::before{
+      content:'';
+      display:inline-block;
+      width:.65rem;height:.65rem;
+      border-radius:50%;margin-right:.45rem;
+      background:var(--brand-2);
+      vertical-align:middle;
+      animation:ping 1.2s cubic-bezier(.4,0,.6,1) infinite;
+    }
+    #status.error{color:var(--danger);}
+    #status.error::before{background:var(--danger);}
+    @keyframes ping{
+      75%,100%{opacity:0;transform:scale(2);}
+    }
+    
+    /* ░░░ Responsive finesse ░░░ */
+    @media (max-width:480px){
+      .text-3xl{font-size:1.75rem;line-height:2.25rem;}
+      .grid-cols-2{grid-template-columns:1fr!important;}
+    }
+    </style>
+    
+    <!-- Facoltativo: Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body class="min-h-screen bg-gray-100 flex flex-col items-center p-8">
+
+  <div class="bg-white shadow-2xl rounded-2xl p-8 w-full max-w-2xl space-y-8">
+
+    <h1 class="text-3xl font-bold text-center">Amazon-Drop Bot</h1>
+
+    <!-- ▶ Credenziali --------------------------------------------------- -->
+    <section>
+      <h2 class="font-semibold mb-4">Credenziali</h2>
+    
+      <!-- 2-col su ≥sm, 1 col su XS -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+    
+        <!-- Email -->
+        <div class="flex flex-col space-y-1">
+          <label for="email" class="text-sm font-medium text-gray-800">Amazon e-mail</label>
+          <input id="email" placeholder="esempio@dominio.com" class="input">
+        </div>
+    
+        <!-- Password -->
+        <div class="flex flex-col space-y-1">
+          <label for="pass" class="text-sm font-medium text-gray-800">Amazon password</label>
+          <input id="pass" type="password" placeholder="••••••••" class="input">
+        </div>
+    
+        <!-- Discord -->
+        <div class="flex flex-col space-y-1">
+          <label for="token" class="text-sm font-medium text-gray-800">Discord token</label>
+          <input id="token" placeholder="DISCORD_TOKEN" class="input">
+        </div>
+    
+        <!-- Proxy URL -->
+        <div class="flex flex-col space-y-1">
+          <label for="proxy" class="text-sm font-medium text-gray-800">Proxy URL </label>
+          <input id="proxy" placeholder="http://proxy:port" class="input">
+        </div>
+    
+        <!-- IPR token -->
+        <div class="flex flex-col space-y-1 sm:col-span-2"> <!-- full-width su 2-col -->
+          <label for="iprtoken" class="text-sm font-medium text-gray-800">IPR API token </label>
+          <input id="iprtoken" placeholder="IPR_API_TOKEN" class="input">
+        </div>
+    
+      </div>
+    </section>
+    
+
+    <!-- ▶ ASIN ---------------------------------------------------------- -->
+    <section>
+      <h2 class="font-semibold mb-2">ASIN da monitorare</h2>
+
+      <!-- contenitore degli input dinamici -->
+      <div id="asinBox" class="space-y-2">
+
+        <!-- primo campo già pronto -->
+        <input class="asin-input input w-full" placeholder="ASIN (es. B08J…)" />
+
+      </div>
+
+      <button id="addAsin"
+              class="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+        ＋
+      </button>
+    </section>
+
+    <!-- ▶ Start --------------------------------------------------------- -->
+    <button id="startBtn"
+            class="w-full py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-lg">
+      ▶ Start
+    </button>
+
+    <p id="status" class="text-center text-sm text-gray-600"></p>
+  </div>
+
+  <!-- ░░ Script --------------------------------------------------------- -->
+  <script>
+  /*──── 1. stile base sugli input con class="input" ────*/
+  document.querySelectorAll('.input').forEach(el =>
+    el.classList.add('px-4','py-2','border','rounded-xl',
+                     'focus:outline-none','focus:ring'));
+
+  /*──── 2. aggiungi nuovo campo ASIN ────*/
+  document.getElementById('addAsin').addEventListener('click', ()=>{
+    const input = document.createElement('input');
+    input.placeholder = 'ASIN (aggiuntivo)';
+    input.className   = 'asin-input input w-full px-4 py-2 border rounded-xl ' +
+                        'focus:outline-none focus:ring';
+    document.getElementById('asinBox').appendChild(input);
+    input.focus();
+  });
+
+  /*──── 3. carica default da /env ────*/
+  window.addEventListener('DOMContentLoaded', async ()=>{
+    try{
+      const d = await fetch('/env').then(r=>r.json());
+      email.value    = d.AMAZON_EMAIL    ?? '';
+      pass.value     = d.AMAZON_PASSWORD ?? '';
+      token.value    = d.DISCORD_TOKEN   ?? '';
+      proxy.value    = d.PROXY_URL       ?? '';
+      iprtoken.value = d.IPR_API_TOKEN   ?? '';
+
+      if(d.MONITOR_ASINS){
+        const list = d.MONITOR_ASINS.split(',').map(s=>s.trim()).filter(Boolean);
+        const box  = document.getElementById('asinBox');
+        /* rimpiazza il primo input e aggiungi eventuali altri */
+        box.innerHTML = '';
+        list.forEach((a,i)=>{
+          const inp = document.createElement('input');
+          inp.value = a;
+          inp.className = 'asin-input input w-full px-4 py-2 border rounded-xl ' +
+                          'focus:outline-none focus:ring';
+          box.appendChild(inp);
+        });
+        if(!list.length) box.innerHTML =
+          '<input class="asin-input input w-full px-4 py-2 border rounded-xl ' +
+          'focus:outline-none focus:ring" placeholder="ASIN (es. B08J…)" />';
+      }
+    }catch{/* ignore */}
+  });
+
+  /*──── 4. start ────*/
+  document.getElementById('startBtn').addEventListener('click', async ()=>{
+    /* raccogli tutti i valori dei campi asin-input */
+    const asins = [...document.querySelectorAll('.asin-input')]
+      .map(i => i.value.trim().toUpperCase())
+      .filter(Boolean);
+
+    if(!asins.length){
+      alert('Inserisci almeno un ASIN'); return;
+    }
+
+    const body = {
+      AMAZON_EMAIL   : email.value.trim(),
+      AMAZON_PASSWORD: pass.value.trim(),
+      DISCORD_TOKEN  : token.value.trim(),
+      PROXY_URL      : proxy.value.trim(),
+      IPR_API_TOKEN  : iprtoken.value.trim(),
+      MONITOR_ASINS  : asins.join(',')
+    };
+
+    const ok = await fetch('/start',{
+      method : 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body   : JSON.stringify(body)
+    }).then(r=>r.json()).then(j=>j.ok).catch(()=>false);
+
+    document.getElementById('status').textContent =
+      ok ? '✅ Bot avviato!' : '❌ Errore avvio';
+  });
+  </script>
+</body>
+</html>

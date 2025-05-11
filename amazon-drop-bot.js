@@ -1,13 +1,14 @@
-require('dotenv').config(); 
+import dotenv from 'dotenv';
+dotenv.config();
 
-const puppeteer  = require('puppeteer-extra');
-const Stealth    = require('puppeteer-extra-plugin-stealth');
-const os         = require('os');
-const path       = require('path');
-const { URL }    = require('url');
-const { ProxyAgent, fetch } = require('undici');
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+puppeteer.use(StealthPlugin());
 
-puppeteer.use(Stealth());
+import os from 'os';
+import path from 'path';
+import { URL } from 'url';
+import { ProxyAgent, fetch } from 'undici';
 
 /* ───── proxy config ───── */
 const proxyUrl      = process.env.PROXY_URL
@@ -27,77 +28,92 @@ let   defaultBrowser     = null;               // senza proxy
 let   proxyBrowser       = null;               // con proxy
 
 /*──────── helper: browser singleton ────────*/
-async function getBrowser(useProxy) {
-  if (useProxy) {
-    if (proxyBrowser) return proxyBrowser;
-    proxyBrowser = await puppeteer.launch({
-      headless       : false,
-      executablePath : chromePath(),
-      userDataDir    : path.join(os.homedir(), 'amazon-profile-proxy'),
-      defaultViewport: null,
-      args           : [
-        '--start-maximized',
-        `--proxy-server=${proxyParsed.hostname}:${proxyParsed.port}`
-      ]
-    });
-    return proxyBrowser;
-  }
-  // default
+async function getBrowser() {
   if (defaultBrowser) return defaultBrowser;
+
   defaultBrowser = await puppeteer.launch({
     headless       : false,
     executablePath : chromePath(),
-    userDataDir    : path.join(os.homedir(), 'amazon-profile'),
+    userDataDir    : path.join(os.homedir(), 'amazon-profile'), // singolo profilo sempre
     defaultViewport: null,
     args           : ['--start-maximized']
   });
+
   return defaultBrowser;
 }
 
 /*──────── helper login ────────*/
 async function loginIfNeeded(page) {
-  const signIn = await page.$('#nav-link-accountList');
-  if (!signIn) return;                    // già loggato
+  try {
+    // Verifica se il link "Accedi" è presente
+    await page.waitForSelector('span#nav-link-accountList-nav-line-1', { timeout: 10000 });
+    const signIn = await page.$('span#nav-link-accountList-nav-line-1');
+    if (!signIn) return;
 
-  console.log('🔐 Login Amazon…');
-  await Promise.allSettled([
-    page.waitForNavigation({waitUntil:'domcontentloaded'}),
-    signIn.click()
-  ]);
+    console.log('🔐 Login Amazon…');
+    await Promise.allSettled([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+      signIn.click()
+    ]);
 
-  /* email */
-  await page.type('#ap_email', process.env.AMAZON_EMAIL, {delay:20});
-  await Promise.allSettled([
-    page.waitForNavigation({waitUntil:'domcontentloaded'}),
-    page.click('#continue')
-  ]);
+    // Inserisce email ma NON clicca "Continua"
+    await page.waitForSelector('#ap_email', { timeout: 10000 });
+    await page.type('#ap_email', process.env.AMAZON_EMAIL, { delay: 20 });
 
-  /* password */
-  await page.type('#ap_password', process.env.AMAZON_PASSWORD, {delay:20});
-  await Promise.allSettled([
-    page.waitForNavigation({waitUntil:'domcontentloaded'}),
-    page.click('#signInSubmit')
-  ]);
+    console.log('🕒 Attendi... clicca manualmente su "Continua"');
 
-  console.log('✅ Login completato');
+    // Attende che venga caricata la password
+    await page.waitForSelector('#ap_password', { timeout: 120000 });
+    console.log('✏️ Inserisco la password...');
+
+    await page.type('#ap_password', process.env.AMAZON_PASSWORD, { delay: 20 });
+
+    // Clicca su "Accedi"
+    await page.waitForSelector('#signInSubmit', { visible: true, timeout: 10000 });
+    await page.click('#signInSubmit');
+
+    // Verifica se compare la schermata 2FA
+    const result = await Promise.race([
+      page.waitForSelector('#auth-mfa-otpcode', { timeout: 20000 }).then(() => '2fa'),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).then(() => 'logged')
+    ]);
+
+    if (result === '2fa') {
+      console.log('📩 Inserisci manualmente il codice 2FA (hai 3 minuti)...');
+      await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 180000 });
+    }
+
+    console.log('✅ Login completato');
+  } catch (err) {
+    console.error(`❌ loginIfNeeded error: ${err.message}`);
+  }
 }
 
 /*──────── click-flow super-snello ────────*/
 async function attemptPurchase(page, asin) {
-
-  await loginIfNeeded(page);  
-
   try {
-    await page.goto(`https://www.amazon.it/dp/${asin}`, { waitUntil:'domcontentloaded', timeout:10000 });
+    // Verifica se bisogna fare login
+    const pText = await page.evaluate(() => document.body.innerText.toLowerCase());
+    if (pText.includes('accedi')) {
+      await loginIfNeeded(page);
+    }
 
+    // Vai al prodotto
+    await page.goto(`https://www.amazon.it/dp/${asin}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 10000
+    });
+
+    // Pulsante "Compra ora"
     const btn = await page.$('#buy-now-button');
     if (!btn) return false;
 
     await Promise.allSettled([
-      page.waitForNavigation({waitUntil:'domcontentloaded', timeout:10000}),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
       btn.click()
     ]);
 
+    // Step successivi fino all'ordine
     const steps = [
       'input[type="submit"][value="Acquista ora"]',
       'input[name="proceedToRetailCheckout"]',
@@ -108,12 +124,15 @@ async function attemptPurchase(page, asin) {
       const b = await page.$(sel);
       if (!b) continue;
       await Promise.allSettled([
-        page.waitForNavigation({waitUntil: sel.endsWith('placeYourOrder1') ? 'networkidle0':'domcontentloaded',
-                                timeout  : 15000}),
+        page.waitForNavigation({
+          waitUntil: sel.endsWith('placeYourOrder1') ? 'networkidle0' : 'domcontentloaded',
+          timeout: 15000
+        }),
         b.click()
       ]);
     }
 
+    // Verifica conferma ordine
     const ok = await page.evaluate(() => {
       const t = document.body.innerText.toLowerCase();
       return t.includes('ordine effettuato') ||
@@ -122,53 +141,68 @@ async function attemptPurchase(page, asin) {
     });
 
     return ok;
-  } catch { return false; }
+  } catch (err) {
+    console.error(`❌ attemptPurchase error: ${err.message}`);
+    return false;
+  }
 }
+
 
 /*──────── funzione principale ────────*/
 async function tryPurchase(asin) {
-
-  /* 1️⃣  se già in coda ⇒ reset timer */
+  // 1️⃣  se già in coda ⇒ reset timer
   const existing = purchaseQueue.get(asin);
   if (existing) {
-    existing.deadline = Date.now() + 10*60e3;
+    existing.deadline = Date.now() + 10 * 60e3;
     console.log(`🔄 [${asin}] Timer reset (+10 min)`);
     return;
   }
 
-  /* 2️⃣  decide se serve proxy (nuova size) */
+  // 2️⃣  decide se usare proxy
   const newSize  = purchaseQueue.size + 1;
   const useProxy = newSize >= 3;
-  const browser  = await getBrowser(useProxy);
-  const page     = await browser.newPage();
 
-  /* autentica proxy se serve */
+  // 3️⃣  apri nuova pagina (unico browser, stesso profilo)
+  const browser = await getBrowser();
+  const page    = await browser.newPage();
+
+  // 4️⃣  abilita proxy sulla pagina se richiesto
   if (useProxy) {
-    await page.authenticate({ username: proxyParsed.username, password: proxyParsed.password });
-    // log traffico residuo (non blocca se fallisce)
-    fetch(`https://dashboard.iproyal.com/api/proxies/traffic?token=${IPR_API_TOKEN}`,
-          { dispatcher: new ProxyAgent(proxyUrl) })
-      .then(r => r.json())
-      .then(j => console.log('📊 Proxy MB rimasti:', j?.remaining))
-      .catch(() => {});
+    await page.authenticate({
+      username: proxyParsed.username,
+      password: proxyParsed.password
+    });
+
+    // Log traffico residuo (non blocca se fallisce)
+    fetch(`https://dashboard.iproyal.com/api/proxies/traffic?token=${IPR_API_TOKEN}`, {
+      dispatcher: new ProxyAgent(proxyUrl)
+    })
+    .then(r => r.json())
+    .then(j => console.log('📊 Proxy MB rimasti:', j?.remaining))
+    .catch(() => {});
   }
 
-  /* blocca media/css/xhr/tracking */
+  // 5️⃣  blocca media/css/xhr/tracking
   await page.setRequestInterception(true);
   page.on('request', r => {
-    const t=r.resourceType();
-    if (t==='image'||t==='media'||t==='font'||t==='stylesheet'||t==='xhr'||r.url().includes('tracking'))
-      r.abort(); else r.continue();
+    const t = r.resourceType();
+    if (['image', 'media', 'font', 'stylesheet', 'xhr'].includes(t) || r.url().includes('tracking')) {
+      r.abort();
+    } else {
+      r.continue();
+    }
   });
+
+  // 6️⃣  User-Agent
   await page.setUserAgent(
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
   );
 
-  /* salva in coda */
-  purchaseQueue.set(asin, { deadline: Date.now() + 10*60e3, page });
+  // 7️⃣  salva in coda
+  purchaseQueue.set(asin, { deadline: Date.now() + 10 * 60e3, page });
 
-  /* loop ricorsivo leggero */
-  (async function loop () {
+  // 8️⃣  loop ricorsivo
+  (async function loop() {
     const item = purchaseQueue.get(asin);
     if (!item) return;
     const success = await attemptPurchase(page, asin);
@@ -176,11 +210,12 @@ async function tryPurchase(asin) {
     if (success || Date.now() >= item.deadline) {
       await page.close();
       purchaseQueue.delete(asin);
-      console.log(`🧹 [${asin}] ${ success?'SUCCESSO':'timeout' } (coda:${purchaseQueue.size})`);
+      console.log(`🧹 [${asin}] ${success ? 'SUCCESSO' : 'timeout'} (coda:${purchaseQueue.size})`);
       return;
     }
-    setTimeout(loop, 2500 + Math.random()*2000);
+    setTimeout(loop, 2500 + Math.random() * 2000);
   })();
 }
 
-module.exports = { tryPurchase };
+
+export { tryPurchase };

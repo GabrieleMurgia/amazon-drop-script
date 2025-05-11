@@ -1,2 +1,10 @@
 # .gitignore
 .env.env
+node_modules/
+*.log
+*.zip
+*.png
+*.jpg
+dist/
+build/
+amazon-profile/

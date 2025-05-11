@@ -1,17 +1,21 @@
-require('dotenv').config();
+import dotenv from 'dotenv';
+dotenv.config(); // carica le variabili da .env
 
-// discord-bot.js
-const { Client }  = require('discord.js-selfbot-v13');
-const { tryPurchase } = require('./amazon-drop-bot');
+import { Client } from 'discord.js-selfbot-v13';
+import { tryPurchase } from './amazon-drop-bot.js';
 
 const client      = new Client({ checkUpdate: false });
-const CHANNEL_ID  = '1370756497914597456';
+const CHANNEL_ID  = '1350960827129401528'/* '1370756497914597456'; */
 
-const validAsins = [
-  'B0C8NR3FPG','B0C8NSGN2H','B0BSR7T3G7',
-  'B0DFD2XFHL','B0DX2K9KKZ','B0DTQCBW9B',
-  'B0DK93ZQPC','B0CJJP1PQB'
-];
+const validAsins = process.env.MONITOR_ASINS
+  ? process.env.MONITOR_ASINS.split(',').map(s=>s.trim()).filter(Boolean)
+  : [
+      'B0C8NR3FPG','B0C8NSGN2H','B0BSR7T3G7',
+      'B0DFD2XFHL','B0DX2K9KKZ','B0DTQCBW9B',
+      'B0DK93ZQPC','B0CJJP1PQB'
+    ];
+
+    console.log(validAsins)
 
 const detectAsins = txt => validAsins.filter(a => txt?.includes(a));
 
