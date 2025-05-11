@@ -1,133 +1,186 @@
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const os = require('os');
-const path = require('path');
+require('dotenv').config(); 
 
-puppeteer.use(StealthPlugin());
+const puppeteer  = require('puppeteer-extra');
+const Stealth    = require('puppeteer-extra-plugin-stealth');
+const os         = require('os');
+const path       = require('path');
+const { URL }    = require('url');
+const { ProxyAgent, fetch } = require('undici');
 
-// --- Config ------------------------------------------------------------------
-const PRODUCTS = [
-  { asin: 'B0C8NR3FPG', url: 'https://www.amazon.it/dp/B0C8NR3FPG', maxPrice: 37.00 },
-  { asin: 'B0C8NSGN2H', url: 'https://www.amazon.it/dp/B0C8NSGN2H', maxPrice: 60.00 },
-  { asin: 'B0BSR7T3G7', url: 'https://www.amazon.it/dp/B0BSR7T3G7', maxPrice: 60.00 },
-  { asin: 'B0DFD2XFHL', url: 'https://www.amazon.it/dp/B0DFD2XFHL', maxPrice: 60.00 },
-  { asin: 'B0DX2K9KKZ', url: 'https://www.amazon.it/dp/B0DX2K9KKZ', maxPrice: 120.00 },
-  { asin: 'B0DTQCBW9B', url: 'https://www.amazon.it/dp/B0DTQCBW9B', maxPrice: 39.99 },
-  { asin: 'B0DK93ZQPC', url: 'https://www.amazon.it/dp/B0DK93ZQPC', maxPrice: 60.00 }
-];
+puppeteer.use(Stealth());
 
-const delay = ms => new Promise(r => setTimeout(r, ms));
+/* ───── proxy config ───── */
+const proxyUrl      = process.env.PROXY_URL
+const IPR_API_TOKEN = process.env.IPR_API_TOKEN
+const proxyParsed   = new URL(proxyUrl);
+/* ──────────────────────── */
 
-function getChromePath() {
+function chromePath () {
   if (process.platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  if (process.platform === 'win32') return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  if (process.platform === 'win32')  return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   return '/usr/bin/google-chrome';
 }
 
-async function checkProductPrice(page, product) {
-  try {
-    await page.goto(product.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+/*■■ globali ■■*/
+const purchaseQueue      = new Map();          // asin ⇒ {deadline, page}
+let   defaultBrowser     = null;               // senza proxy
+let   proxyBrowser       = null;               // con proxy
 
-    const priceText = await page.$eval('#corePrice_feature_div span.a-offscreen', el =>
-      el.textContent.replace(',', '.').replace(/[^0-9.]/g, '')
-    );
-    const price = parseFloat(priceText);
-    console.log(`💰 [${product.asin}] Prezzo: €${price}`);
-
-    if (price <= product.maxPrice) {
-      console.log(`🎯 [${product.asin}] Prezzo OK (€${price}). Avvio acquisto...`);
-
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-        page.click('#buy-now-button')
-      ]);
-
-      const confirmBtn = await page.$('input[type="submit"][value="Acquista ora"]');
-      if (confirmBtn) {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-          confirmBtn.click()
-        ]);
-      }
-
-      const proceedBtn = await page.$('input[name="proceedToRetailCheckout"]');
-      if (proceedBtn) {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-          proceedBtn.click()
-        ]);
-      }
-
-      const finalBuyNowBtn = await page.$('input[name="placeYourOrder1"]');
-      if (finalBuyNowBtn) {
-        await finalBuyNowBtn.click();
-        console.log(`🛒 Ordine completato per ${product.asin}!`);
-      } else {
-        console.log(`🕒 [${product.asin}] In attesa clic finale manuale su 'Acquista ora'`);
-      }
-
-      const errorFound = await page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
-        return text.includes('ops! ci dispiace') || text.includes('errore');
-      });
-      if (errorFound) {
-        console.log(`🚨 [${product.asin}] Errore Amazon rilevato. Riproverò al prossimo ciclo.`);
-      }
-
-      const orderConfirmed = await page.evaluate(() =>
-        document.body.innerText.includes('Ordine effettuato')
-      );
-      if (orderConfirmed) {
-        console.log(`✅ Ordine confermato per ${product.asin}. Riprendo il monitoraggio.`);
-        await page.goto('about:blank');
-      } else {
-        console.log(`❗ [${product.asin}] Nessuna conferma ordine rilevata.`);
-      }
-    } else {
-      console.log(`❌ [${product.asin}] Prezzo troppo alto. (€${price})`);
-    }
-  } catch (err) {
-    console.error(`❌ [${product.asin}] Errore: ${err.message}`);
+/*──────── helper: browser singleton ────────*/
+async function getBrowser(useProxy) {
+  if (useProxy) {
+    if (proxyBrowser) return proxyBrowser;
+    proxyBrowser = await puppeteer.launch({
+      headless       : false,
+      executablePath : chromePath(),
+      userDataDir    : path.join(os.homedir(), 'amazon-profile-proxy'),
+      defaultViewport: null,
+      args           : [
+        '--start-maximized',
+        `--proxy-server=${proxyParsed.hostname}:${proxyParsed.port}`
+      ]
+    });
+    return proxyBrowser;
   }
-}
-
-async function monitorProduct(page, product) {
-  let cycles = 0;
-  while (true) {
-    const start = Date.now();
-    await checkProductPrice(page, product);
-    cycles++;
-    if (cycles % 5 === 0) console.log(`🔁 [${product.asin}] Cicli completati: ${cycles}`);
-    const elapsed = Date.now() - start;
-    const randomDelay = 1500 + Math.floor(Math.random() * 2000); // 1.5s - 3.5s
-    await delay(Math.max(randomDelay - elapsed, 0));
-  }
-}
-
-(async () => {
-  const browser = await puppeteer.launch({
-    headless: false,
-    executablePath: getChromePath(),
-    userDataDir: path.join(os.homedir(), 'amazon-profile'),
+  // default
+  if (defaultBrowser) return defaultBrowser;
+  defaultBrowser = await puppeteer.launch({
+    headless       : false,
+    executablePath : chromePath(),
+    userDataDir    : path.join(os.homedir(), 'amazon-profile'),
     defaultViewport: null,
-    args: ['--start-maximized']
+    args           : ['--start-maximized']
   });
+  return defaultBrowser;
+}
 
-  for (const product of PRODUCTS) {
-    const page = await browser.newPage();
+/*──────── helper login ────────*/
+async function loginIfNeeded(page) {
+  const signIn = await page.$('#nav-link-accountList');
+  if (!signIn) return;                    // già loggato
 
-    await page.setRequestInterception(true);
-    page.on('request', req => {
-      const type = req.resourceType();
-      if (['image', 'font', 'media', /* 'stylesheet', */ 'xhr'].includes(type) || req.url().includes('tracking')) {
-        req.abort();
-      } else {
-        req.continue();
-      }
+  console.log('🔐 Login Amazon…');
+  await Promise.allSettled([
+    page.waitForNavigation({waitUntil:'domcontentloaded'}),
+    signIn.click()
+  ]);
+
+  /* email */
+  await page.type('#ap_email', process.env.AMAZON_EMAIL, {delay:20});
+  await Promise.allSettled([
+    page.waitForNavigation({waitUntil:'domcontentloaded'}),
+    page.click('#continue')
+  ]);
+
+  /* password */
+  await page.type('#ap_password', process.env.AMAZON_PASSWORD, {delay:20});
+  await Promise.allSettled([
+    page.waitForNavigation({waitUntil:'domcontentloaded'}),
+    page.click('#signInSubmit')
+  ]);
+
+  console.log('✅ Login completato');
+}
+
+/*──────── click-flow super-snello ────────*/
+async function attemptPurchase(page, asin) {
+
+  await loginIfNeeded(page);  
+
+  try {
+    await page.goto(`https://www.amazon.it/dp/${asin}`, { waitUntil:'domcontentloaded', timeout:10000 });
+
+    const btn = await page.$('#buy-now-button');
+    if (!btn) return false;
+
+    await Promise.allSettled([
+      page.waitForNavigation({waitUntil:'domcontentloaded', timeout:10000}),
+      btn.click()
+    ]);
+
+    const steps = [
+      'input[type="submit"][value="Acquista ora"]',
+      'input[name="proceedToRetailCheckout"]',
+      'input[name="placeYourOrder1"]'
+    ];
+
+    for (const sel of steps) {
+      const b = await page.$(sel);
+      if (!b) continue;
+      await Promise.allSettled([
+        page.waitForNavigation({waitUntil: sel.endsWith('placeYourOrder1') ? 'networkidle0':'domcontentloaded',
+                                timeout  : 15000}),
+        b.click()
+      ]);
+    }
+
+    const ok = await page.evaluate(() => {
+      const t = document.body.innerText.toLowerCase();
+      return t.includes('ordine effettuato') ||
+             t.includes('grazie per il tuo ordine') ||
+             t.includes('thanks for your order');
     });
 
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+    return ok;
+  } catch { return false; }
+}
 
-    monitorProduct(page, product);
+/*──────── funzione principale ────────*/
+async function tryPurchase(asin) {
+
+  /* 1️⃣  se già in coda ⇒ reset timer */
+  const existing = purchaseQueue.get(asin);
+  if (existing) {
+    existing.deadline = Date.now() + 10*60e3;
+    console.log(`🔄 [${asin}] Timer reset (+10 min)`);
+    return;
   }
-})();
+
+  /* 2️⃣  decide se serve proxy (nuova size) */
+  const newSize  = purchaseQueue.size + 1;
+  const useProxy = newSize >= 3;
+  const browser  = await getBrowser(useProxy);
+  const page     = await browser.newPage();
+
+  /* autentica proxy se serve */
+  if (useProxy) {
+    await page.authenticate({ username: proxyParsed.username, password: proxyParsed.password });
+    // log traffico residuo (non blocca se fallisce)
+    fetch(`https://dashboard.iproyal.com/api/proxies/traffic?token=${IPR_API_TOKEN}`,
+          { dispatcher: new ProxyAgent(proxyUrl) })
+      .then(r => r.json())
+      .then(j => console.log('📊 Proxy MB rimasti:', j?.remaining))
+      .catch(() => {});
+  }
+
+  /* blocca media/css/xhr/tracking */
+  await page.setRequestInterception(true);
+  page.on('request', r => {
+    const t=r.resourceType();
+    if (t==='image'||t==='media'||t==='font'||t==='stylesheet'||t==='xhr'||r.url().includes('tracking'))
+      r.abort(); else r.continue();
+  });
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  );
+
+  /* salva in coda */
+  purchaseQueue.set(asin, { deadline: Date.now() + 10*60e3, page });
+
+  /* loop ricorsivo leggero */
+  (async function loop () {
+    const item = purchaseQueue.get(asin);
+    if (!item) return;
+    const success = await attemptPurchase(page, asin);
+
+    if (success || Date.now() >= item.deadline) {
+      await page.close();
+      purchaseQueue.delete(asin);
+      console.log(`🧹 [${asin}] ${ success?'SUCCESSO':'timeout' } (coda:${purchaseQueue.size})`);
+      return;
+    }
+    setTimeout(loop, 2500 + Math.random()*2000);
+  })();
+}
+
+module.exports = { tryPurchase };
