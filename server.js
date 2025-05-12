@@ -13,9 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 /* ────── configurazione ────── */
-const PORT = 3000;
 let runningChild = null;
-
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public'))); // serve GUI
@@ -82,8 +80,24 @@ app.post('/start', (req, res) => {
   res.json({ ok: true, msg: 'Bot avviato!' });
 });
 
-/* ───────────── avvia server GUI + browser ───────────── */
-app.listen(PORT, () => {
-  console.log(`🚀 GUI pronta → http://localhost:${PORT}`);
-  open(`http://localhost:${PORT}`);
-});
+/* ───────────── avvia server GUI con gestione porta ───────────── */
+const DEFAULT_PORT = 3000;
+
+function startServer(port) {
+  const server = app.listen(port)
+    .on('listening', () => {
+      console.log(`🚀 GUI pronta → http://localhost:${port}`);
+      open(`http://localhost:${port}`);
+    })
+    .on('error', err => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`⚠️ Porta ${port} già in uso. Riprovo su ${port + 1}...`);
+        startServer(port + 1);
+      } else {
+        console.error('❌ Errore avvio server:', err);
+        process.exit(1);
+      }
+    });
+}
+
+startServer(DEFAULT_PORT);
