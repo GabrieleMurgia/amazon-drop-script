@@ -8,29 +8,42 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 puppeteer.use(StealthPlugin());
 
-import fs          from 'fs';
-import os          from 'os';
-import path        from 'path';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { execSync } from 'child_process';
-import { URL }     from 'url';
+import { URL } from 'url';
 import { ProxyAgent, fetch } from 'undici';
 
 /* ───── proxy config ───── */
-const proxyUrl      = process.env.PROXY_URL;
+const proxyUrl = process.env.PROXY_URL;
 const IPR_API_TOKEN = process.env.IPR_API_TOKEN;
-const proxyParsed   = proxyUrl ? new URL(proxyUrl) : null;
+const proxyParsed = proxyUrl ? new URL(proxyUrl) : null;
 /* ───────────────────────── */
 
 function chromePath() {
   if (process.platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  if (process.platform === 'win32')  return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  if (process.platform === 'win32') {
+    const guesses = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+    ];
+    const found = guesses.find(fs.existsSync);
+    if (!found) throw new Error('❌ Chrome non trovato su Windows');
+    return found;
+  }
   return '/usr/bin/google-chrome';
 }
 
-/*──────── kill di Chrome con profilo amazon-profile ────────*/
-function killStaleChromes() {
-  const profileDir = path.join(os.homedir(), 'amazon-profile');
+function getProfileDir() {
+  const base = os.homedir();
+  if (process.platform === 'win32') return path.join(base, 'puppeteer-profile-bot');
+  return path.join(base, 'amazon-profile');
+}
 
+/*──────── kill di Chrome con profilo ────────*/
+function killStaleChromes() {
+  const profileDir = getProfileDir();
   try {
     if (process.platform === 'win32') {
       const cmd = `wmic process where "CommandLine like '%%${profileDir.replace(/\\/g, '\\\\')}%%'" call terminate`;
@@ -45,23 +58,21 @@ function killStaleChromes() {
 }
 
 /*■■ globali ■■*/
-const purchaseQueue  = new Map();   // asin ⇒ {deadline, page}
-let   defaultBrowser = null;        // browser pronto
-let   launchPromise  = null;        // promise in corso
+const purchaseQueue = new Map();
+let defaultBrowser = null;
+let launchPromise = null;
 
 /*──────── helper: browser singleton ────────*/
 async function getBrowser() {
   if (defaultBrowser) return defaultBrowser;
-  if (launchPromise)  return launchPromise;
+  if (launchPromise) return launchPromise;
 
   launchPromise = (async () => {
-    /* 1️⃣ chiudi Chrome orfani */
     killStaleChromes();
 
-    /* 2️⃣ rimuovi eventuale lock */
+    const profileDir = getProfileDir();
     try {
-      const profileDir = path.join(os.homedir(), 'amazon-profile');
-      const lockFile   = path.join(profileDir, 'SingletonLock');
+      const lockFile = path.join(profileDir, 'SingletonLock');
       if (fs.existsSync(lockFile)) {
         fs.unlinkSync(lockFile);
         console.log('🔓  Lock orfano rimosso');
@@ -70,17 +81,22 @@ async function getBrowser() {
       console.warn('⚠️  Impossibile rimuovere SingletonLock:', err.message);
     }
 
-    /* 3️⃣ lancia il browser */
-    const browser = await puppeteer.launch({
-      headless       : false,
-      executablePath : chromePath(),
-      userDataDir    : path.join(os.homedir(), 'amazon-profile'),
-      defaultViewport: null,
-      args           : ['--start-maximized']
-    });
+    try {
+      const browser = await puppeteer.launch({
+        headless: false,
+        executablePath: chromePath(),
+        userDataDir: profileDir,
+        defaultViewport: null,
+        args: ['--start-maximized']
+      });
 
-    defaultBrowser = browser;
-    return browser;
+      console.log('✅ Browser avviato');
+      defaultBrowser = browser;
+      return browser;
+    } catch (err) {
+      console.error('❌ Puppeteer launch fallito:', err.message);
+      throw err;
+    }
   })();
 
   return launchPromise;
@@ -105,7 +121,7 @@ async function loginIfNeeded(page) {
       el => el.textContent.trim().toLowerCase()
     ).catch(() => '');
 
-    if (btnText && !btnText.includes('accedi')) return; // già loggato
+    if (btnText && !btnText.includes('accedi')) return;
 
     console.log('🔐 Login Amazon…');
     await Promise.allSettled([
@@ -146,7 +162,7 @@ async function attemptPurchase(page, asin) {
   try {
     await page.goto('https://www.amazon.it/', {
       waitUntil: 'domcontentloaded',
-      timeout  : 10000
+      timeout: 10000
     });
     await loginIfNeeded(page);
 
@@ -156,7 +172,7 @@ async function attemptPurchase(page, asin) {
 
     await page.goto(checkoutUrl, {
       waitUntil: 'domcontentloaded',
-      timeout  : 10000
+      timeout: 10000
     });
 
     const placeBtn = await page.$('input[name="placeYourOrder1"]');
@@ -191,11 +207,11 @@ async function tryPurchase(asin) {
     return;
   }
 
-  const newSize  = purchaseQueue.size + 1;
+  const newSize = purchaseQueue.size + 1;
   const useProxy = proxyParsed && newSize >= 3;
 
   const browser = await getBrowser();
-  const page    = await browser.newPage();
+  const page = await browser.newPage();
 
   if (useProxy) {
     await page.authenticate({
