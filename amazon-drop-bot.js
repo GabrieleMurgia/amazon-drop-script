@@ -36,9 +36,14 @@ function chromePath() {
 }
 
 function getProfileDir() {
-  const base = os.homedir();
-  if (process.platform === 'win32') return path.join(base, 'puppeteer-profile-bot');
-  return path.join(base, 'amazon-profile');
+  if (process.platform === 'win32') {
+    // Usa una cartella locale non sincronizzata (es. AppData\Local)
+    const dir = path.join(process.env.LOCALAPPDATA || os.homedir(), 'puppeteer-amazon-bot');
+    console.log('📂 userDataDir Windows:', dir);
+    return dir;
+  }
+  // macOS / Linux: profilo classico
+  return path.join(os.homedir(), 'amazon-profile');
 }
 
 /*──────── kill di Chrome con profilo ────────*/
