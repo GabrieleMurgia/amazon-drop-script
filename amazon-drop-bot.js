@@ -189,6 +189,8 @@ async function attemptPurchase(page, asin) {
       ]);
     }
 
+
+
     const ok = await page.evaluate(() => {
       const t = document.body.innerText.toLowerCase();
       return t.includes('ordine effettuato') ||
