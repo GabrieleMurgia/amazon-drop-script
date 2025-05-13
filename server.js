@@ -6,6 +6,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import open from 'open';
 import { fileURLToPath } from 'url';
+import { getBrowser } from './amazon-drop-bot.js';
 
 dotenv.config(); // carica .env se presente
 
@@ -66,6 +67,7 @@ app.post('/start', (req, res) => {
     console.log('⏹  Bot precedente terminato');
   }
 
+  /* getBrowser().catch(console.error); */
   // 4. avvia nuovo processo bot
   runningChild = spawn('node', ['check-discord.js'], {
     stdio: 'inherit',

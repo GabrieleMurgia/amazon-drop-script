@@ -7,7 +7,7 @@ WEBHOOK_URL = (
 )
 
 ASINS = [
-    "B0B1MLQ8VM",
+    "B0BWFMMBRD",
     "B0BSR7T3G7",          # «quello sopra» (rimane identico)
     "B0C8NSGN2H",          # secondo ASIN
     "B0DFD2XFHL",        # terzo ASIN (se vuoi un altro, cambia qui)

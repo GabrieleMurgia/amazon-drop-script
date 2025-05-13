@@ -1,8 +1,7 @@
 import dotenv from 'dotenv';
-dotenv.config(); // carica le variabili da .env
-
+import { tryPurchase, getBrowser } from './amazon-drop-bot.js';
 import { Client } from 'discord.js-selfbot-v13';
-import { tryPurchase } from './amazon-drop-bot.js';
+dotenv.config(); // carica le variabili da .env
 
 const client      = new Client({ checkUpdate: false });
 const CHANNEL_ID  = /* '1350960827129401528' */ '1370756497914597456';
@@ -46,3 +45,4 @@ client.on('messageCreate', msg => {
 
 
 client.login(process.env.DISCORD_TOKEN);
+getBrowser().catch(console.error);
