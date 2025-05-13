@@ -8,9 +8,11 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 puppeteer.use(StealthPlugin());
 
-import os from 'os';
-import path from 'path';
-import { URL } from 'url';
+import fs          from 'fs';
+import os          from 'os';
+import path        from 'path';
+import { execSync } from 'child_process';
+import { URL }     from 'url';
 import { ProxyAgent, fetch } from 'undici';
 
 /* ───── proxy config ───── */
@@ -19,35 +21,85 @@ const IPR_API_TOKEN = process.env.IPR_API_TOKEN;
 const proxyParsed   = proxyUrl ? new URL(proxyUrl) : null;
 /* ───────────────────────── */
 
-function chromePath () {
+function chromePath() {
   if (process.platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (process.platform === 'win32')  return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   return '/usr/bin/google-chrome';
 }
 
+/*──────── kill di Chrome con profilo amazon-profile ────────*/
+function killStaleChromes() {
+  const profileDir = path.join(os.homedir(), 'amazon-profile');
+
+  try {
+    if (process.platform === 'win32') {
+      const cmd = `wmic process where "CommandLine like '%%${profileDir.replace(/\\/g, '\\\\')}%%'" call terminate`;
+      execSync(cmd, { stdio: 'ignore' });
+    } else {
+      execSync(`pkill -f "${profileDir}" || true`, { stdio: 'ignore' });
+    }
+    console.log('🗑️  Chrome vecchi terminati (se presenti)');
+  } catch {
+    /* nessun Chrome da killare o permessi mancanti */
+  }
+}
+
 /*■■ globali ■■*/
 const purchaseQueue  = new Map();   // asin ⇒ {deadline, page}
-let   defaultBrowser = null;        // singleton senza proxy (profilo fisso)
+let   defaultBrowser = null;        // browser pronto
+let   launchPromise  = null;        // promise in corso
 
 /*──────── helper: browser singleton ────────*/
 async function getBrowser() {
   if (defaultBrowser) return defaultBrowser;
+  if (launchPromise)  return launchPromise;
 
-  defaultBrowser = await puppeteer.launch({
-    headless       : false,
-    executablePath : chromePath(),
-    userDataDir    : path.join(os.homedir(), 'amazon-profile'), // profilo persistente
-    defaultViewport: null,
-    args           : ['--start-maximized']
-  });
+  launchPromise = (async () => {
+    /* 1️⃣ chiudi Chrome orfani */
+    killStaleChromes();
 
-  return defaultBrowser;
+    /* 2️⃣ rimuovi eventuale lock */
+    try {
+      const profileDir = path.join(os.homedir(), 'amazon-profile');
+      const lockFile   = path.join(profileDir, 'SingletonLock');
+      if (fs.existsSync(lockFile)) {
+        fs.unlinkSync(lockFile);
+        console.log('🔓  Lock orfano rimosso');
+      }
+    } catch (err) {
+      console.warn('⚠️  Impossibile rimuovere SingletonLock:', err.message);
+    }
+
+    /* 3️⃣ lancia il browser */
+    const browser = await puppeteer.launch({
+      headless       : false,
+      executablePath : chromePath(),
+      userDataDir    : path.join(os.homedir(), 'amazon-profile'),
+      defaultViewport: null,
+      args           : ['--start-maximized']
+    });
+
+    defaultBrowser = browser;
+    return browser;
+  })();
+
+  return launchPromise;
 }
+
+/*──────── chiusura ordinata ────────*/
+async function gracefulExit() {
+  if (defaultBrowser) {
+    try { await defaultBrowser.close(); }
+    catch { defaultBrowser.process().kill('SIGKILL'); }
+  }
+  process.exit(0);
+}
+process.on('SIGINT', gracefulExit);
+process.on('SIGTERM', gracefulExit);
 
 /*──────── helper login ────────*/
 async function loginIfNeeded(page) {
   try {
-    // Il link "Account e liste" è sempre presente; controlla se contiene "Accedi"
     const btnText = await page.$eval(
       '#nav-link-accountList-nav-line-1',
       el => el.textContent.trim().toLowerCase()
@@ -89,27 +141,24 @@ async function loginIfNeeded(page) {
   }
 }
 
-/*──────── click‑flow con URL checkout‑portal ────────*/
+/*──────── click-flow con URL checkout-portal ────────*/
 async function attemptPurchase(page, asin) {
   try {
-    // 🔑 assicurati di avere una sessione valida
     await page.goto('https://www.amazon.it/', {
       waitUntil: 'domcontentloaded',
       timeout  : 10000
     });
     await loginIfNeeded(page);
 
-    // 🚀 URL "Compra ora" diretto
     const checkoutUrl =
       'https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now' +
-      '?checkoutClientId=retailwebsite&buyNow=1&quantity=1&asin=' + asin;
+      `?checkoutClientId=retailwebsite&buyNow=1&quantity=1&asin=${asin}`;
 
     await page.goto(checkoutUrl, {
       waitUntil: 'domcontentloaded',
       timeout  : 10000
     });
 
-    // 🛒 pulsante finale "Acquista ora"
     const placeBtn = await page.$('input[name="placeYourOrder1"]');
     if (placeBtn) {
       await Promise.allSettled([
@@ -118,7 +167,6 @@ async function attemptPurchase(page, asin) {
       ]);
     }
 
-    // ✅ conferma ordine
     const ok = await page.evaluate(() => {
       const t = document.body.innerText.toLowerCase();
       return t.includes('ordine effettuato') ||
@@ -136,7 +184,6 @@ async function attemptPurchase(page, asin) {
 
 /*──────── funzione principale ────────*/
 async function tryPurchase(asin) {
-  // 1️⃣ se già in coda ⇒ reset timer
   const existing = purchaseQueue.get(asin);
   if (existing) {
     existing.deadline = Date.now() + 10 * 60e3;
@@ -144,22 +191,18 @@ async function tryPurchase(asin) {
     return;
   }
 
-  // 2️⃣ decide se usare proxy
   const newSize  = purchaseQueue.size + 1;
   const useProxy = proxyParsed && newSize >= 3;
 
-  // 3️⃣ apri nuova pagina
   const browser = await getBrowser();
   const page    = await browser.newPage();
 
-  // 4️⃣ abilita proxy sulla pagina se richiesto
   if (useProxy) {
     await page.authenticate({
       username: proxyParsed.username,
       password: proxyParsed.password
     });
 
-    // logging traffico residuo (best effort)
     if (IPR_API_TOKEN) {
       fetch(`https://dashboard.iproyal.com/api/proxies/traffic?token=${IPR_API_TOKEN}`, {
         dispatcher: new ProxyAgent(proxyUrl)
@@ -170,7 +213,6 @@ async function tryPurchase(asin) {
     }
   }
 
-  // 5️⃣ blocca media/css ma NON xhr (checkout carica i form via xhr)
   await page.setRequestInterception(true);
   page.on('request', r => {
     const t = r.resourceType();
@@ -181,15 +223,12 @@ async function tryPurchase(asin) {
     }
   });
 
-  // 6️⃣ User‑Agent
   await page.setUserAgent(
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
   );
 
-  // 7️⃣ aggiungi alla coda
   purchaseQueue.set(asin, { deadline: Date.now() + 10 * 60e3, page });
 
-  // 8️⃣ loop ricorsivo finché successo o timeout
   (async function loop() {
     const item = purchaseQueue.get(asin);
     if (!item) return;
@@ -208,7 +247,3 @@ async function tryPurchase(asin) {
 }
 
 export { tryPurchase };
-
-
-// ────────────────────────────────────────────────
-// FILE
