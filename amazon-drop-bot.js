@@ -124,7 +124,12 @@ async function getBrowser () {
       executablePath: chromePath(),
       userDataDir: profileDir,
       defaultViewport: null,
-      args: ['--start-maximized']
+      args: [
+          '--start-maximized',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding'
+      ]
     });
 
     console.log('✅ Browser avviato');
@@ -135,6 +140,19 @@ async function getBrowser () {
       await setupPage(p);
       pagePool.push(p);
     }
+
+    const keepAlive = await browser.newPage();
+await keepAlive.goto('https://www.amazon.it/', { waitUntil: 'domcontentloaded' });
+console.log('♥️  Tab keep-alive pronta (si aggiorna ogni 5 min)');
+
+setInterval(async () => {
+  try {
+    await keepAlive.reload({ waitUntil: 'domcontentloaded' });
+    console.log('↻  Refresh keep-alive OK');
+  } catch (err) {
+    console.warn('⚠️  Refresh keep-alive fallito:', err.message);
+  }
+}, 5 * 60 * 1000);   // 5 minuti
 
     defaultBrowser = browser;
     return browser;
@@ -210,7 +228,8 @@ async function attemptPurchase (page, asin) {
     const checkoutUrl =
       'https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now' +
       `?checkoutClientId=retailwebsite&buyNow=1&quantity=1&asin=${asin}`;
-
+    
+    
     await page.goto(checkoutUrl, {
       waitUntil: 'domcontentloaded',
       timeout  : 10000
@@ -218,10 +237,23 @@ async function attemptPurchase (page, asin) {
 
     const placeBtn = await page.$('input[name="placeYourOrder1"]');
     if (placeBtn) {
+      await page.bringToFront();  
       await Promise.allSettled([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
         placeBtn.click()
       ]);
+
+/*       const okXHR = await page.evaluate(async btn => {
+  const form = btn.form;
+  const action = form.action;
+  const data = new FormData(form);
+  const res  = await fetch(action, { method: 'POST', body: data, credentials: 'include' });
+  return res.ok && (await res.text()).toLowerCase().includes('ordine effettuato');
+}, placeBtn);
+if (okXHR) return true;    */
+
+
+
     }
 
     const ok = await page.evaluate(() => {
