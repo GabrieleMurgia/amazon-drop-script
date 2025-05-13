@@ -4,7 +4,7 @@ import { Client } from 'discord.js-selfbot-v13';
 dotenv.config(); // carica le variabili da .env
 
 const client      = new Client({ checkUpdate: false });
-const CHANNEL_ID  = /* '1350960827129401528' */ '1370756497914597456';
+const CHANNEL_ID  = '1350960827129401528' /* '1370756497914597456' */;
 
 const validAsins = process.env.MONITOR_ASINS
   ? process.env.MONITOR_ASINS.split(',').map(s=>s.trim()).filter(Boolean)
