@@ -37,12 +37,12 @@ function chromePath() {
 
 function getProfileDir() {
   if (process.platform === 'win32') {
-    // Usa una cartella locale non sincronizzata (es. AppData\Local)
-    const dir = path.join(process.env.LOCALAPPDATA || os.homedir(), 'puppeteer-amazon-bot');
+    // cartella locale, sempre scrivibile, non OneDrive
+    const dir = path.join(process.env.LOCALAPPDATA, 'puppeteer-amazon-bot');
     console.log('📂 userDataDir Windows:', dir);
     return dir;
   }
-  // macOS / Linux: profilo classico
+  // macOS / Linux
   return path.join(os.homedir(), 'amazon-profile');
 }
 
@@ -87,6 +87,7 @@ async function getBrowser() {
     }
 
     try {
+      console.log('🚀 Lancio Chrome con profilo:', profileDir);
       const browser = await puppeteer.launch({
         headless: false,
         executablePath: chromePath(),
