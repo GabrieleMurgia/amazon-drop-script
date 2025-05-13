@@ -53,17 +53,20 @@ function killStaleChromes () {
       execSync(`pkill -f "${profileDir}" || true`, { stdio: 'ignore' });
     }
     console.log('🗑️  Chrome vecchi terminati (se presenti)');
-  } catch { /* nessuno o permessi mancanti */ }
+  } catch {/* ignore */}
 }
 
 /*■■ globali ■■*/
-const purchaseQueue = new Map();
+const purchaseQueue  = new Map();
 let   defaultBrowser = null;
 let   launchPromise  = null;
 
-/*─────────── PAGE-POOL ───────────*/
-const POOL_SIZE = process.env.MONITOR_ASINS.split(',').map(s=>s.trim()).filter(Boolean).length;
-const pagePool  = [];
+/*────────── PAGE-POOL ──────────*/
+const POOL_SIZE = (process.env.MONITOR_ASINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean).length || 3;          // almeno 3
+const pagePool = [];
 
 async function setupPage (page) {
   page.removeAllListeners('request');
@@ -94,9 +97,9 @@ async function getFreePage (browser) {
 
 function releasePage (page) {
   page.removeAllListeners();
-  page.goto('about:blank').catch(() => {});
+  page.goto('about:blank').catch(()=>{});
   if (pagePool.length < POOL_SIZE) pagePool.push(page);
-  else page.close({ runBeforeUnload: false }).catch(() => {});
+  else page.close({ runBeforeUnload: false }).catch(()=>{});
 }
 
 /*──────── browser singleton ────────*/
@@ -109,9 +112,9 @@ async function getBrowser () {
 
     const profileDir = getProfileDir();
     try {
-      const lockFile = path.join(profileDir, 'SingletonLock');
-      if (fs.existsSync(lockFile)) {
-        fs.unlinkSync(lockFile);
+      const lock = path.join(profileDir, 'SingletonLock');
+      if (fs.existsSync(lock)) {
+        fs.unlinkSync(lock);
         console.log('🔓  Lock orfano rimosso');
       }
     } catch (err) {
@@ -120,39 +123,40 @@ async function getBrowser () {
 
     console.log('🚀 Lancio Chrome con profilo:', profileDir);
     const browser = await puppeteer.launch({
-      headless: false,                       // puoi mettere 'new' se vuoi headless
+      headless: false,                   // usa 'new' se vuoi headless
       executablePath: chromePath(),
       userDataDir: profileDir,
       defaultViewport: null,
       args: [
-          '--start-maximized',
-  '--disable-background-timer-throttling',
-  '--disable-backgrounding-occluded-windows',
-  '--disable-renderer-backgrounding'
+        '--start-maximized',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding'
       ]
     });
 
     console.log('✅ Browser avviato');
 
-    /* warm-up: crea 3 tab nel pool */
+    /* warm-up: tab nel pool */
     while (pagePool.length < POOL_SIZE) {
       const p = await browser.newPage();
       await setupPage(p);
       pagePool.push(p);
     }
 
+    /* tab keep-alive */
     const keepAlive = await browser.newPage();
-await keepAlive.goto('https://www.amazon.it/', { waitUntil: 'domcontentloaded' });
-console.log('♥️  Tab keep-alive pronta (si aggiorna ogni 5 min)');
+    await keepAlive.goto('https://www.amazon.it/', { waitUntil: 'domcontentloaded' });
+    console.log('♥️  Tab keep-alive pronta (refresh ogni 5 min)');
 
-setInterval(async () => {
-  try {
-    await keepAlive.reload({ waitUntil: 'domcontentloaded' });
-    console.log('↻  Refresh keep-alive OK');
-  } catch (err) {
-    console.warn('⚠️  Refresh keep-alive fallito:', err.message);
-  }
-}, 5 * 60 * 1000);   // 5 minuti
+    setInterval(async () => {
+      try {
+        await keepAlive.reload({ waitUntil: 'domcontentloaded' });
+        console.log('↻  Refresh keep-alive OK');
+      } catch (err) {
+        console.warn('⚠️  Refresh keep-alive fallito:', err.message);
+      }
+    }, 5 * 60 * 1000);   // 5 min
 
     defaultBrowser = browser;
     return browser;
@@ -178,36 +182,35 @@ async function loginIfNeeded (page) {
     const btnText = await page.$eval(
       '#nav-link-accountList-nav-line-1',
       el => el.textContent.trim().toLowerCase()
-    ).catch(() => '');
+    ).catch(()=>'');
 
-    if (btnText && !btnText.includes('accedi')) return; // già loggato
+    if (btnText && !btnText.includes('accedi')) return;  // già loggato
 
     console.log('🔐 Login Amazon…');
     await Promise.allSettled([
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
+      page.waitForNavigation({ waitUntil:'domcontentloaded', timeout:10000 }),
       page.click('#nav-link-accountList')
     ]);
 
-    await page.waitForSelector('#ap_email', { timeout: 10000 });
-    await page.type('#ap_email', process.env.AMAZON_EMAIL, { delay: 20 });
+    await page.waitForSelector('#ap_email', { timeout:10000 });
+    await page.type('#ap_email', process.env.AMAZON_EMAIL, { delay:20 });
 
-    console.log('🕒 Attendi... clicca manualmente su "Continua"');
+    console.log('🕒 Attendi… clicca manualmente “Continua”');
 
-    await page.waitForSelector('#ap_password', { timeout: 120000 });
-    console.log('✏️ Inserisco la password…');
-    await page.type('#ap_password', process.env.AMAZON_PASSWORD, { delay: 20 });
+    await page.waitForSelector('#ap_password', { timeout:120000 });
+    await page.type('#ap_password', process.env.AMAZON_PASSWORD, { delay:20 });
 
-    await page.waitForSelector('#signInSubmit', { visible: true, timeout: 10000 });
+    await page.waitForSelector('#signInSubmit', { visible:true, timeout:10000 });
     await page.click('#signInSubmit');
 
     const result = await Promise.race([
-      page.waitForSelector('#auth-mfa-otpcode', { timeout: 20000 }).then(() => '2fa'),
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).then(() => 'logged')
+      page.waitForSelector('#auth-mfa-otpcode', { timeout:20000 }).then(()=> '2fa'),
+      page.waitForNavigation({ waitUntil:'domcontentloaded', timeout:20000 }).then(()=> 'logged')
     ]);
 
     if (result === '2fa') {
       console.log('📩 Inserisci il codice 2FA (3 min)…');
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 180000 });
+      await page.waitForNavigation({ waitUntil:'domcontentloaded', timeout:180000 });
     }
 
     console.log('✅ Login completato');
@@ -219,41 +222,27 @@ async function loginIfNeeded (page) {
 /*──────── acquisto ────────*/
 async function attemptPurchase (page, asin) {
   try {
-    await page.goto('https://www.amazon.it/', {
-      waitUntil: 'domcontentloaded',
-      timeout  : 10000
-    });
-    await loginIfNeeded(page);
-
+    /* checkout diretto – la tab keep-alive mantiene la sessione */
     const checkoutUrl =
       'https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now' +
       `?checkoutClientId=retailwebsite&buyNow=1&quantity=1&asin=${asin}`;
-    
-    
-    await page.goto(checkoutUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout  : 10000
-    });
+
+    await page.goto(checkoutUrl, { waitUntil:'domcontentloaded', timeout:10000 });
+
+    /* fallback: se Amazon ci ha rediretto a /signin */
+    if (page.url().includes('/ap/signin')) {
+      console.log('🔄  Redirect a login, eseguo login e riprovo');
+      await loginIfNeeded(page);
+      await page.goto(checkoutUrl, { waitUntil:'domcontentloaded', timeout:10000 });
+    }
 
     const placeBtn = await page.$('input[name="placeYourOrder1"]');
     if (placeBtn) {
-      await page.bringToFront();  
+      await page.bringToFront();      // tab visibile ⇒ JS Amazon non viene bloccato
       await Promise.allSettled([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
+        page.waitForNavigation({ waitUntil:'domcontentloaded', timeout:10000 }),
         placeBtn.click()
       ]);
-
-/*       const okXHR = await page.evaluate(async btn => {
-  const form = btn.form;
-  const action = form.action;
-  const data = new FormData(form);
-  const res  = await fetch(action, { method: 'POST', body: data, credentials: 'include' });
-  return res.ok && (await res.text()).toLowerCase().includes('ordine effettuato');
-}, placeBtn);
-if (okXHR) return true;    */
-
-
-
     }
 
     const ok = await page.evaluate(() => {
@@ -280,10 +269,10 @@ async function tryPurchase (asin) {
     return;
   }
 
-  const newSize   = purchaseQueue.size + 1;
-  const useProxy  = proxyParsed && newSize >= 3;
-  const browser   = await getBrowser();
-  const page      = await getFreePage(browser);
+  const newSize  = purchaseQueue.size + 1;
+  const useProxy = proxyParsed && newSize >= 3;
+  const browser  = await getBrowser();
+  const page     = await getFreePage(browser);
 
   if (useProxy) {
     await page.authenticate({
@@ -297,7 +286,7 @@ async function tryPurchase (asin) {
       })
       .then(r => r.json())
       .then(j => console.log('📊 Proxy MB rimasti:', j?.remaining))
-      .catch(() => {});
+      .catch(()=>{});
     }
   }
 
@@ -316,7 +305,7 @@ async function tryPurchase (asin) {
       return;
     }
 
-    setTimeout(loop, 400 + Math.random() * 600); // 0,4-1,0 s
+    setTimeout(loop, 400 + Math.random() * 600); // retry 0,4-1,0 s
   })();
 }
 
