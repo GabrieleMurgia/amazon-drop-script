@@ -24,7 +24,7 @@ client.on('ready', () =>
 
 client.on('messageCreate', msg => {
   if (msg.channel.id !== CHANNEL_ID) return;
-
+   
   console.log('📥  Nuovo messaggio');
   const tryAll = list => list.forEach(asin => {
     console.log(`🚨  ASIN ${asin} trovato → tryPurchase`);
